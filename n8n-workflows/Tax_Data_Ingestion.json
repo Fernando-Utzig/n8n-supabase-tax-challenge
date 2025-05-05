@@ -1,0 +1,346 @@
+{
+  "name": "Tax Data Ingestion",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {},
+        "options": {
+          "dataPropertyAttachmentsPrefixName": "attachment_",
+          "downloadAttachments": true
+        }
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "fff52048-3b46-473c-91b5-4b3576eb5d10",
+      "name": "Gmail Trigger",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "IFUQNhDtxOFOMxB8",
+          "name": "Unnamed credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "13a15625-8df4-4a32-8dbe-775f91768788",
+              "leftValue": "={{ Object.keys($binary).length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "40c2a4cb-28c9-40af-899c-522d2898d16e",
+      "name": "The email has attachments?"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $binary[Object.keys($binary)[0]].mimeType }}",
+                    "rightValue": "/pdf|jpeg|png|jpg/i",
+                    "operator": {
+                      "type": "string",
+                      "operation": "regex"
+                    },
+                    "id": "29286de5-8018-45c1-af31-234a326700aa"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Document"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "95ea2595-8299-4771-a612-bdf73f39e645",
+                    "leftValue": "={{ $binary[Object.keys($binary)[0]].mimeType }}",
+                    "rightValue": "/mp3|wav|mpeg|ogg|m4a/i",
+                    "operator": {
+                      "type": "string",
+                      "operation": "regex"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Audio"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Text (Fallback)"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        480,
+        -100
+      ],
+      "id": "3a3c98bc-e401-490c-a7fe-f01caa5886de",
+      "name": "Select type of Attachment"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "attachment_0",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        700,
+        -240
+      ],
+      "id": "904a8b47-d313-481e-833d-59c42c038949",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- Function Node: Classify & Extract (Regex) ---\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const extracted_text = item.json.text || \"\";\n  let document_type = \"Unknown\";\n  // *** Initialize extracted_data properly for type checking ***\n  let extracted_data = {}; // Use index signature type\n\n  // --- Document Type Classification (Regex) ---\n  if (/\\bW-?2\\b/i.test(extracted_text) && /Wage and Tax Statement/i.test(extracted_text)) {\n    document_type = \"W-2\";\n  } else if (/\\b1099-?MISC\\b/i.test(extracted_text)) {\n    document_type = \"1099-MISC\";\n  } else if (/\\b1099-?NEC\\b/i.test(extracted_text)) {\n    document_type = \"1099-NEC\";\n  } else if (/\\b1099-?INT\\b/i.test(extracted_text)) {\n    document_type = \"1099-INT\";\n  } else if (/\\b1099-?DIV\\b/i.test(extracted_text)) {\n    document_type = \"1099-DIV\";\n  } else if (/\\b1099(-|\\s+Form)?/i.test(extracted_text)) {\n     document_type = \"1099-Generic\";\n  } else if (/\\b(invoice|remittance|bill)\\b/i.test(extracted_text) && /\\b(total due|amount due|balance)\\b/i.test(extracted_text)) {\n    document_type = \"Business Invoice\";\n  }\n\n  // --- Data Extraction (Regex Examples) ---\n  // *** Adjust SSN Regex to match your input format more closely ***\n  // Original text has \"***-**-6789\" but also \"social security number :\"\n  // Let's try matching the label and the pattern that follows, allowing for '*' or digits\n  const ssnRegex = /(social security number|soc sec num|ssn)[:\\s]*([\\d\\*]{3}-[\\d\\*]{2}-[\\d\\*]{4})\\b/i;\n  const ssnMatch = extracted_text.match(ssnRegex);\n  if (ssnMatch && ssnMatch[2]) {\n    // Assign directly, initialization handles the 'does not exist' warning\n    extracted_data.ssn_found = ssnMatch[2];\n  }\n\n  // Example: Basic Invoice Number\n  const invoiceNumRegex = /(Invoice\\s*(Number|No\\.?|#)|Inv\\sNo\\.)[:\\s]*([A-Z0-9-]+)/i;\n  const invoiceNumMatch = extracted_text.match(invoiceNumRegex);\n  if (invoiceNumMatch && invoiceNumMatch[3]) {\n     extracted_data.invoice_number_found = invoiceNumMatch[3];\n  }\n\n  // Example: Total Amount Due\n  const amountDueRegex = /(Total\\s*Due|Amount\\s*Due|Balance\\s*Due|Total)[:\\s]*\\$?\\s*([\\d,]+\\.\\d{2})\\b/i;\n  const amountDueMatch = extracted_text.match(amountDueRegex);\n  if (amountDueMatch && amountDueMatch[2]) {\n     extracted_data.total_amount_due = amountDueMatch[2].replace(/,/g, '');\n  }\n\n  // --- Prepare Output ---\n  results.push({\n      json: {\n          ...item.json,\n          document_type: document_type,\n          extracted_data: Object.keys(extracted_data).length > 0 ? extracted_data : null\n      }\n  });\n}\n\nreturn results;\n// --- End Function Node ---"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        -240
+      ],
+      "id": "3e779dc7-3414-4c66-b3b0-f65e43dc4bd5",
+      "name": "Classify & Extract (Regex)"
+    },
+    {
+      "parameters": {
+        "tableId": "documents",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "filename",
+              "fieldValue": "={{ $json.filename }}"
+            },
+            {
+              "fieldId": "source",
+              "fieldValue": "={{ $json.source }}"
+            },
+            {
+              "fieldId": "mime_type",
+              "fieldValue": "={{ $json.mime_type }}"
+            },
+            {
+              "fieldId": "document_type",
+              "fieldValue": "={{ $json.document_type }}"
+            },
+            {
+              "fieldId": "extracted_data",
+              "fieldValue": "={{ $json.extracted_data }}"
+            },
+            {
+              "fieldId": "processing_status",
+              "fieldValue": "completed"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        -240
+      ],
+      "id": "fbd60404-584f-4703-9198-f56f7d738eb6",
+      "name": "Supabase",
+      "credentials": {
+        "supabaseApi": {
+          "id": "rDxo7g4Y9b5ROfRj",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "41c6ca31-5482-49ab-abf5-6353a7874c33",
+              "name": "filename",
+              "value": "={{ $json.info.Title }}",
+              "type": "string"
+            },
+            {
+              "id": "b2151817-8c08-4577-be48-c8e233c485ef",
+              "name": "source",
+              "value": "email",
+              "type": "string"
+            },
+            {
+              "id": "00c6df17-983c-4c02-af96-f68681ddd5e9",
+              "name": "mime_type",
+              "value": "={{ $node[\"Gmail Trigger\"].binary.attachment_0.mimeType }}",
+              "type": "string"
+            },
+            {
+              "id": "27047698-fe37-4c53-8fc0-835d4195c869",
+              "name": "document_type",
+              "value": "={{ $json.document_type }}",
+              "type": "string"
+            },
+            {
+              "id": "f6a0bfad-673e-4ac2-838e-c31ecf18d4f1",
+              "name": "extracted_data",
+              "value": "={{ $json.extracted_data }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1180,
+        -240
+      ],
+      "id": "91a61fb6-40eb-4998-ae63-f44b61627cc5",
+      "name": "Edit Fields"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "The email has attachments?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "The email has attachments?": {
+      "main": [
+        [
+          {
+            "node": "Select type of Attachment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select type of Attachment": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Classify & Extract (Regex)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify & Extract (Regex)": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase": {
+      "main": [
+        []
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "e1858323-a6c9-413c-ab53-1e2711aa30b5",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "889743b79323a95d3422db6c76d812dc8f43eb2be04e2dd21413adf9650c0f1b"
+  },
+  "id": "Tft0rzFbBVCNIDoE",
+  "tags": []
+}
